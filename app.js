@@ -169,10 +169,25 @@
     return { cat: cat / sum, dog: dog / sum, neither: neither / sum };
   }
 
-  function renderScores(cat, dog, neither, label) {
+  function renderScores(cat, dog, neither, labelOverride) {
     const s = normalizeScores(cat, dog, neither);
+    const ranked = [
+      { name: "Cat", v: s.cat },
+      { name: "Dog", v: s.dog },
+      { name: "Neither", v: s.neither },
+    ].sort((a, b) => b.v - a.v);
+    const top = ranked[0];
+    const pct = (top.v * 100).toFixed(1);
+
+    // Title always matches the winning bar percentage
+    const label =
+      labelOverride ||
+      (top.name === "Neither"
+        ? `Neither  ·  ${pct}%`
+        : `It’s a ${top.name}  ·  ${pct}%`);
+
     labelOut.textContent = label;
-    labelOut.classList.toggle("is-neither", s.neither >= Math.max(s.cat, s.dog));
+    labelOut.classList.toggle("is-neither", top.name === "Neither");
     catBar.style.width = "0%";
     dogBar.style.width = "0%";
     noneBar.style.width = "0%";
@@ -192,7 +207,6 @@
     predictBtn.disabled = true;
     setStatus("Checking if this looks like a cat or dog…");
     try {
-      // Wait for image decode
       if (!preview.complete) {
         await new Promise((resolve, reject) => {
           preview.onload = resolve;
@@ -203,14 +217,13 @@
       const gate = await detectPetSignal(preview);
 
       if (!gate.isPet) {
-        // Not a pet → Neither dominates; Cat/Dog share tiny residual (sums to 100%)
         const neither = Math.min(0.96, Math.max(0.80, 1 - gate.petScore));
         const residual = 1 - neither;
         renderScores(
           residual / 2,
           residual / 2,
           neither,
-          "Neither — not a cat or dog"
+          `Neither — not a cat or dog  ·  ${(neither * 100).toFixed(1)}%`
         );
         setStatus("Done — image cleared from this device.");
         return;
@@ -221,27 +234,16 @@
       const feeds = { [session.inputNames[0]]: input };
       const out = await session.run(feeds);
       const probs = Array.from(out[session.outputNames[0]].data);
-      let cat = probs[0];
-      let dog = probs[1];
+      const cat = probs[0];
+      const dog = probs[1];
       const confidence = Math.max(cat, dog);
 
       if (confidence < MIN_PET_CONFIDENCE) {
-        const neither = 1 - confidence;
-        renderScores(cat, dog, neither, "Neither — unsure if cat or dog");
+        renderScores(cat, dog, 1 - confidence, null);
       } else {
-        const predIdx = cat >= dog ? 0 : 1;
-        // Small Neither remainder so bars always sum to 100%
-        const neither = Math.max(0.02, Math.min(0.15, 1 - confidence));
-        const remain = 1 - neither;
-        const petSum = cat + dog;
-        cat = (cat / petSum) * remain;
-        dog = (dog / petSum) * remain;
-        renderScores(
-          cat,
-          dog,
-          neither,
-          `It’s a ${CLASS_NAMES[predIdx]}  ·  ${(confidence * 100).toFixed(1)}%`
-        );
+        // Confident pet: show Cat/Dog model probs directly; Neither = 0
+        // so title % matches the Dog/Cat bar exactly
+        renderScores(cat, dog, 0, null);
       }
       setStatus("Done — image cleared from this device.");
     } catch (err) {
