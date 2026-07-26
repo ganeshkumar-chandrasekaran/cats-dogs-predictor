@@ -316,6 +316,11 @@ button.ghost:hover:not(:disabled) {
 
 .fill.cat { background: linear-gradient(90deg, #ffc089, var(--cat)); }
 .fill.dog { background: linear-gradient(90deg, #ff9a4d, var(--dog)); }
+.fill.none { background: linear-gradient(90deg, #8a8078, #5c534c); }
+
+.label-out.is-neither {
+  color: #d7cfc6;
+}
 
 .pct {
   text-align: right;
