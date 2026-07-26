@@ -46,10 +46,7 @@
   const dogPct = document.getElementById("dogPct");
   const nonePct = document.getElementById("nonePct");
   const canvas = document.getElementById("workCanvas");
-  // Re-get context after resizes; keep options when recreating
-  function getCtx() {
-    return canvas.getContext("2d", { willReadFrequently: true, alpha: false });
-  }
+  const ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: false });
 
   let session = null;
   let gateModel = null;
@@ -71,7 +68,6 @@
   }
 
   function wipeImageData() {
-    const ctx = getCtx();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     selectedFile = null;
     fileInput.value = "";
@@ -89,165 +85,84 @@
     return DOG_HINTS.some((h) => n.includes(h));
   }
 
-  /** Read JPEG EXIF orientation (1–8). PNG/WebP → 1. */
-  function getExifOrientation(file) {
-    return new Promise((resolve) => {
-      if (!file || !file.type || !file.type.includes("jpeg") && file.type !== "image/jpg") {
-        // Still try for .jpg with empty type
-        if (file && file.type && !/jpe?g/i.test(file.type) && file.type !== "") {
-          resolve(1);
-          return;
-        }
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const view = new DataView(reader.result);
-          if (view.byteLength < 2 || view.getUint16(0, false) !== 0xffd8) {
-            resolve(1);
-            return;
-          }
-          let offset = 2;
-          while (offset + 4 < view.byteLength) {
-            const marker = view.getUint16(offset, false);
-            offset += 2;
-            if (marker === 0xffe1) {
-              // APP1
-              const appLength = view.getUint16(offset, false);
-              if (offset + appLength > view.byteLength) break;
-              if (
-                view.getUint32(offset + 2, false) !== 0x45786966 ||
-                view.getUint16(offset + 6, false) !== 0x0000
-              ) {
-                offset += appLength;
-                continue;
-              }
-              const tiffOffset = offset + 8;
-              const little = view.getUint16(tiffOffset, false) === 0x4949;
-              if (view.getUint16(tiffOffset + 2, little) !== 0x002a) {
-                resolve(1);
-                return;
-              }
-              const ifd0 = tiffOffset + view.getUint32(tiffOffset + 4, little);
-              const entries = view.getUint16(ifd0, little);
-              for (let i = 0; i < entries; i++) {
-                const entry = ifd0 + 2 + i * 12;
-                if (entry + 12 > view.byteLength) break;
-                const tag = view.getUint16(entry, little);
-                if (tag === 0x0112) {
-                  resolve(view.getUint16(entry + 8, little));
-                  return;
-                }
-              }
-              resolve(1);
-              return;
-            }
-            if ((marker & 0xff00) !== 0xff00) break;
-            if (marker === 0xffda) break; // SOS
-            const len = view.getUint16(offset, false);
-            offset += len;
-          }
-          resolve(1);
-        } catch (_) {
-          resolve(1);
-        }
-      };
-      reader.onerror = () => resolve(1);
-      reader.readAsArrayBuffer(file.slice(0, 128 * 1024));
-    });
-  }
-
-  /** Draw source onto a new canvas with EXIF orientation applied once. */
-  function bakeOrientation(source, orientation) {
-    const w = source.width;
-    const h = source.height;
-    const out = document.createElement("canvas");
-    const octx = out.getContext("2d");
-    const swap = orientation >= 5 && orientation <= 8;
-    out.width = swap ? h : w;
-    out.height = swap ? w : h;
-
-    switch (orientation) {
-      case 2: octx.transform(-1, 0, 0, 1, w, 0); break;
-      case 3: octx.transform(-1, 0, 0, -1, w, h); break;
-      case 4: octx.transform(1, 0, 0, -1, 0, h); break;
-      case 5: octx.transform(0, 1, 1, 0, 0, 0); break;
-      case 6: octx.transform(0, 1, -1, 0, h, 0); break; // 90° CW
-      case 7: octx.transform(0, -1, -1, 0, h, w); break;
-      case 8: octx.transform(0, -1, 1, 0, 0, w); break; // 90° CCW
-      default: break;
-    }
-    octx.drawImage(source, 0, 0);
-    return out;
-  }
-
-  async function decodeRawBitmap(file) {
-    // Prefer raw pixels (no auto-orient) so we apply EXIF exactly once.
+  /**
+   * Mobile photos often store EXIF orientation. Desktops may auto-correct in <img>,
+   * while canvas drawImage can stay sideways on phones — causing wrong predictions.
+   * createImageBitmap(..., { imageOrientation: 'from-image' }) fixes that.
+   */
+  async function loadOrientedBitmap(source) {
     if (typeof createImageBitmap === "function") {
       try {
-        const bitmap = await createImageBitmap(file, { imageOrientation: "none" });
-        return { bitmap, appliesExifOurselves: true };
+        return await createImageBitmap(source, { imageOrientation: "from-image" });
       } catch (_) {
         try {
-          // Browser may have already oriented — do not apply EXIF again
-          const bitmap = await createImageBitmap(file);
-          return { bitmap, appliesExifOurselves: false };
+          return await createImageBitmap(source);
         } catch (_) {
           /* fall through */
         }
       }
     }
-    const url = URL.createObjectURL(file);
-    try {
-      const img = new Image();
-      img.decoding = "async";
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = url;
-      });
-      if (img.decode) {
-        try { await img.decode(); } catch (_) { /* ignore */ }
-      }
-      // <img> decode is typically already upright on modern browsers
-      return { bitmap: img, appliesExifOurselves: false };
-    } finally {
-      URL.revokeObjectURL(url);
+
+    // Fallback: decode via Image element
+    const img = await loadHTMLImage(source);
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth || img.width;
+    c.height = img.naturalHeight || img.height;
+    c.getContext("2d").drawImage(img, 0, 0);
+    if (typeof createImageBitmap === "function") {
+      return createImageBitmap(c);
     }
+    return c;
   }
 
-  function coverCropToWorkCanvas(source) {
-    const iw = source.width;
-    const ih = source.height;
+  function loadHTMLImage(source) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      if (typeof source === "string") {
+        img.src = source;
+      } else if (source instanceof Blob) {
+        const url = URL.createObjectURL(source);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve(img);
+        };
+        img.src = url;
+      } else {
+        // HTMLImageElement already loaded
+        if (source.complete && source.naturalWidth) resolve(source);
+        else {
+          source.onload = () => resolve(source);
+          source.onerror = reject;
+        }
+      }
+    });
+  }
+
+  /** Center-crop cover into square canvas (same pixels for gate + classifier). */
+  function drawCoverToCanvas(bitmap, size) {
+    const iw = bitmap.width;
+    const ih = bitmap.height;
     if (!iw || !ih) throw new Error("Invalid image dimensions");
 
-    canvas.width = IMG_SIZE;
-    canvas.height = IMG_SIZE;
-    const ctx = getCtx();
-    ctx.clearRect(0, 0, IMG_SIZE, IMG_SIZE);
+    canvas.width = size;
+    canvas.height = size;
+    ctx.clearRect(0, 0, size, size);
 
-    const scale = Math.max(IMG_SIZE / iw, IMG_SIZE / ih);
-    const sw = IMG_SIZE / scale;
-    const sh = IMG_SIZE / scale;
+    const scale = Math.max(size / iw, size / ih);
+    const sw = size / scale;
+    const sh = size / scale;
     const sx = (iw - sw) / 2;
     const sy = (ih - sh) / 2;
-    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, IMG_SIZE, IMG_SIZE);
+    ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, size, size);
+
+    if (typeof bitmap.close === "function") bitmap.close();
   }
 
   async function prepareSquareCanvasFromFile(file) {
-    const { bitmap, appliesExifOurselves } = await decodeRawBitmap(file);
-    let upright = bitmap;
-
-    if (appliesExifOurselves) {
-      const orientation = await getExifOrientation(file);
-      if (orientation && orientation !== 1) {
-        upright = bakeOrientation(bitmap, orientation);
-        if (typeof bitmap.close === "function") bitmap.close();
-      }
-    }
-
-    coverCropToWorkCanvas(upright);
-    if (typeof upright.close === "function") upright.close();
+    const bitmap = await loadOrientedBitmap(file);
+    drawCoverToCanvas(bitmap, IMG_SIZE);
     return canvas;
   }
 
@@ -265,7 +180,6 @@
   }
 
   function canvasToTensor() {
-    const ctx = getCtx();
     const { data } = ctx.getImageData(0, 0, IMG_SIZE, IMG_SIZE);
     const float32 = new Float32Array(3 * IMG_SIZE * IMG_SIZE);
     let i = 0;
@@ -359,6 +273,7 @@
     predictBtn.disabled = true;
     setStatus("Preparing image…");
     try {
+      // One oriented square for BOTH MobileNet gate and MiniResNet
       const square = await prepareSquareCanvasFromFile(selectedFile);
 
       setStatus("Checking if this looks like a cat or dog…");
