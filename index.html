@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Cat or Dog?</title>
+  <meta name="description" content="Upload a cat or dog photo. Private in-browser MiniResNet prediction — image cleared after result." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Inline critical theme so dark+orange always shows even if CSS is cached -->
+  <style>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #080605 !important;
+      color: #ffe8d6 !important;
+      font-family: Manrope, system-ui, sans-serif;
+    }
+    .brand {
+      color: #ff8a3d !important;
+      font-family: "Instrument Serif", Georgia, serif;
+    }
+    button:not(.ghost) {
+      background: linear-gradient(135deg, #ff8a3d, #e85d04) !important;
+      color: #1a0f08 !important;
+    }
+  </style>
+  <link rel="stylesheet" href="styles.css?v=dark-orange-4" />
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="grain"></span>
+  </div>
+
+  <main class="frame">
+    <header class="hero">
+      <p class="brand">Cat or Dog?</p>
+      <h1>One photo. Instant verdict.</h1>
+      <p class="lede">
+        Your trained MiniResNet runs privately in this browser.
+        Nothing is uploaded — and the image is wiped after prediction.
+      </p>
+    </header>
+
+    <section class="stage" aria-labelledby="upload-label">
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-describedby="upload-hint">
+        <input id="fileInput" type="file" accept="image/*" hidden />
+        <div id="previewWrap" class="preview-wrap hidden">
+          <img id="preview" alt="Selected pet photo preview" />
+          <div class="preview-fade"></div>
+        </div>
+        <div id="placeholder" class="placeholder">
+          <div class="paw" aria-hidden="true">
+            <svg viewBox="0 0 64 64" width="56" height="56" fill="none">
+              <ellipse cx="18" cy="18" rx="7" ry="9" fill="currentColor" opacity=".85"/>
+              <ellipse cx="32" cy="12" rx="7" ry="9" fill="currentColor" opacity=".85"/>
+              <ellipse cx="46" cy="18" rx="7" ry="9" fill="currentColor" opacity=".85"/>
+              <ellipse cx="22" cy="34" rx="6" ry="8" fill="currentColor" opacity=".75"/>
+              <ellipse cx="42" cy="34" rx="6" ry="8" fill="currentColor" opacity=".75"/>
+              <path d="M20 44c0-8 6-14 12-14s12 6 12 14c0 8-5 14-12 14s-12-6-12-14z" fill="currentColor"/>
+            </svg>
+          </div>
+          <p id="upload-label">Drop a cat or dog photo here</p>
+          <p id="upload-hint" class="hint">or click to browse · JPG, PNG, WEBP</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button id="predictBtn" type="button" disabled>
+          <span>Predict</span>
+        </button>
+        <button id="clearBtn" type="button" class="ghost" disabled>Clear</button>
+      </div>
+
+      <p id="status" class="status" role="status" aria-live="polite">Warming up the model…</p>
+
+      <div id="result" class="result hidden" aria-live="polite">
+        <div class="result-top">
+          <p class="eyebrow">Prediction</p>
+          <p class="label-out" id="labelOut"></p>
+        </div>
+        <div class="bars">
+          <div class="bar-row">
+            <span class="cls">Cat</span>
+            <div class="track"><div id="catBar" class="fill cat"></div></div>
+            <span id="catPct" class="pct">0%</span>
+          </div>
+          <div class="bar-row">
+            <span class="cls">Dog</span>
+            <div class="track"><div id="dogBar" class="fill dog"></div></div>
+            <span id="dogPct" class="pct">0%</span>
+          </div>
+        </div>
+        <p class="privacy">Image removed from memory after this result.</p>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span>MiniResNet · ONNX Runtime · GitHub Pages</span>
+    </footer>
+  </main>
+
+  <canvas id="workCanvas" width="224" height="224" hidden></canvas>
+  <script src="app.js?v=dark-orange-4"></script>
+</body>
+</html>
