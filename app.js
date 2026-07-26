@@ -3,11 +3,9 @@
   const IMG_SIZE = 224;
   const IMAGENET_MEAN = [0.485, 0.456, 0.406];
   const IMAGENET_STD = [0.229, 0.224, 0.225];
-  // MiniResNet must be fairly sure after the pet gate passes
   const MIN_PET_CONFIDENCE = 0.60;
   const MODEL_URL = new URL("./model/miniresnet_cats_dogs.onnx", window.location.href).href;
 
-  // ImageNet / MobileNet labels that indicate a domestic cat or dog
   const CAT_HINTS = [
     "cat", "kitten", "tabby", "tiger cat", "persian cat", "siamese cat",
     "egyptian cat", "lynx", "cougar", "lion", "tiger", "leopard", "cheetah", "jaguar",
@@ -19,17 +17,16 @@
     "malamute", "samoyed", "pomeranian", "rottweiler", "doberman", "greyhound",
     "whippet", "pekinese", "papillon", "toy terrier", "affenpinscher", "bloodhound",
     "bluetick", "coonhound", "walker hound", "english foxhound", "redbone",
-    "borzoi", "irish wolfhound", "italian greyhound", "whippet", "ibizan hound",
+    "borzoi", "irish wolfhound", "italian greyhound", "ibizan hound",
     "norwegian elkhound", "otterhound", "saluki", "scottish deerhound", "weimaraner",
     "staffordshire", "cairn", "australian terrier", "dandie", "boston bull",
     "miniature schnauzer", "giant schnauzer", "standard schnauzer",
     "kelpie", "briard", "komondor", "old english sheepdog", "shetland sheepdog",
-    "collie", "border collie", "bouvier", "rottweiler", "german shepherd",
+    "border collie", "bouvier", "german shepherd",
     "cardigan", "pembroke", "toy poodle", "miniature poodle", "standard poodle",
     "mexican hairless", "timber wolf", "white wolf", "red wolf", "coyote", "dingo",
     "dhole", "african hunting dog",
   ];
-  // Avoid accidental substring matches
   const FALSE_CAT = ["caterpillar", "catamaran", "catheter", "catalina", "cation"];
 
   const dropzone = document.getElementById("dropzone");
@@ -49,7 +46,7 @@
   const dogPct = document.getElementById("dogPct");
   const nonePct = document.getElementById("nonePct");
   const canvas = document.getElementById("workCanvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: false });
 
   let session = null;
   let gateModel = null;
@@ -88,9 +85,89 @@
     return DOG_HINTS.some((h) => n.includes(h));
   }
 
-  async function detectPetSignal(imgEl) {
-    // MobileNet gate: reject humans / objects that are not cat/dog-like
-    const preds = await gateModel.classify(imgEl, 5);
+  /**
+   * Mobile photos often store EXIF orientation. Desktops may auto-correct in <img>,
+   * while canvas drawImage can stay sideways on phones — causing wrong predictions.
+   * createImageBitmap(..., { imageOrientation: 'from-image' }) fixes that.
+   */
+  async function loadOrientedBitmap(source) {
+    if (typeof createImageBitmap === "function") {
+      try {
+        return await createImageBitmap(source, { imageOrientation: "from-image" });
+      } catch (_) {
+        try {
+          return await createImageBitmap(source);
+        } catch (_) {
+          /* fall through */
+        }
+      }
+    }
+
+    // Fallback: decode via Image element
+    const img = await loadHTMLImage(source);
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth || img.width;
+    c.height = img.naturalHeight || img.height;
+    c.getContext("2d").drawImage(img, 0, 0);
+    if (typeof createImageBitmap === "function") {
+      return createImageBitmap(c);
+    }
+    return c;
+  }
+
+  function loadHTMLImage(source) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      if (typeof source === "string") {
+        img.src = source;
+      } else if (source instanceof Blob) {
+        const url = URL.createObjectURL(source);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          resolve(img);
+        };
+        img.src = url;
+      } else {
+        // HTMLImageElement already loaded
+        if (source.complete && source.naturalWidth) resolve(source);
+        else {
+          source.onload = () => resolve(source);
+          source.onerror = reject;
+        }
+      }
+    });
+  }
+
+  /** Center-crop cover into square canvas (same pixels for gate + classifier). */
+  function drawCoverToCanvas(bitmap, size) {
+    const iw = bitmap.width;
+    const ih = bitmap.height;
+    if (!iw || !ih) throw new Error("Invalid image dimensions");
+
+    canvas.width = size;
+    canvas.height = size;
+    ctx.clearRect(0, 0, size, size);
+
+    const scale = Math.max(size / iw, size / ih);
+    const sw = size / scale;
+    const sh = size / scale;
+    const sx = (iw - sw) / 2;
+    const sy = (ih - sh) / 2;
+    ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, size, size);
+
+    if (typeof bitmap.close === "function") bitmap.close();
+  }
+
+  async function prepareSquareCanvasFromFile(file) {
+    const bitmap = await loadOrientedBitmap(file);
+    drawCoverToCanvas(bitmap, IMG_SIZE);
+    return canvas;
+  }
+
+  async function detectPetSignal(canvasEl) {
+    const preds = await gateModel.classify(canvasEl, 5);
     let catScore = 0;
     let dogScore = 0;
     for (const p of preds) {
@@ -102,10 +179,30 @@
     return { isPet, petScore, catScore, dogScore, preds };
   }
 
+  function canvasToTensor() {
+    const { data } = ctx.getImageData(0, 0, IMG_SIZE, IMG_SIZE);
+    const float32 = new Float32Array(3 * IMG_SIZE * IMG_SIZE);
+    let i = 0;
+    for (let y = 0; y < IMG_SIZE; y++) {
+      for (let x = 0; x < IMG_SIZE; x++) {
+        const p = (y * IMG_SIZE + x) * 4;
+        const r = data[p] / 255;
+        const g = data[p + 1] / 255;
+        const b = data[p + 2] / 255;
+        float32[i] = (r - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
+        float32[IMG_SIZE * IMG_SIZE + i] = (g - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
+        float32[2 * IMG_SIZE * IMG_SIZE + i] = (b - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
+        i++;
+      }
+    }
+    return new ort.Tensor("float32", float32, [1, 3, IMG_SIZE, IMG_SIZE]);
+  }
+
   async function loadModels() {
     try {
       setStatus("Loading models…");
       ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/";
+      if (window.tf) await tf.ready();
       const [sess, gate] = await Promise.all([
         ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] }),
         mobilenet.load({ version: 2, alpha: 1.0 }),
@@ -133,36 +230,6 @@
     setStatus("Image selected. Click Predict.");
   }
 
-  function preprocessToTensor() {
-    const img = preview;
-    const iw = img.naturalWidth;
-    const ih = img.naturalHeight;
-    const scale = Math.max(IMG_SIZE / iw, IMG_SIZE / ih);
-    const sw = IMG_SIZE / scale;
-    const sh = IMG_SIZE / scale;
-    const sx = (iw - sw) / 2;
-    const sy = (ih - sh) / 2;
-    ctx.clearRect(0, 0, IMG_SIZE, IMG_SIZE);
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, IMG_SIZE, IMG_SIZE);
-
-    const { data } = ctx.getImageData(0, 0, IMG_SIZE, IMG_SIZE);
-    const float32 = new Float32Array(3 * IMG_SIZE * IMG_SIZE);
-    let i = 0;
-    for (let y = 0; y < IMG_SIZE; y++) {
-      for (let x = 0; x < IMG_SIZE; x++) {
-        const p = (y * IMG_SIZE + x) * 4;
-        const r = data[p] / 255;
-        const g = data[p + 1] / 255;
-        const b = data[p + 2] / 255;
-        float32[i] = (r - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
-        float32[IMG_SIZE * IMG_SIZE + i] = (g - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
-        float32[2 * IMG_SIZE * IMG_SIZE + i] = (b - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
-        i++;
-      }
-    }
-    return new ort.Tensor("float32", float32, [1, 3, IMG_SIZE, IMG_SIZE]);
-  }
-
   function normalizeScores(cat, dog, neither) {
     const sum = cat + dog + neither;
     if (sum <= 0) return { cat: 0, dog: 0, neither: 1 };
@@ -179,7 +246,6 @@
     const top = ranked[0];
     const pct = (top.v * 100).toFixed(1);
 
-    // Title always matches the winning bar percentage
     const label =
       labelOverride ||
       (top.name === "Neither"
@@ -205,16 +271,13 @@
   async function predict() {
     if (!session || !gateModel || !selectedFile) return;
     predictBtn.disabled = true;
-    setStatus("Checking if this looks like a cat or dog…");
+    setStatus("Preparing image…");
     try {
-      if (!preview.complete) {
-        await new Promise((resolve, reject) => {
-          preview.onload = resolve;
-          preview.onerror = reject;
-        });
-      }
+      // One oriented square for BOTH MobileNet gate and MiniResNet
+      const square = await prepareSquareCanvasFromFile(selectedFile);
 
-      const gate = await detectPetSignal(preview);
+      setStatus("Checking if this looks like a cat or dog…");
+      const gate = await detectPetSignal(square);
 
       if (!gate.isPet) {
         const neither = Math.min(0.96, Math.max(0.80, 1 - gate.petScore));
@@ -230,7 +293,7 @@
       }
 
       setStatus("Pet detected — classifying Cat vs Dog…");
-      const input = preprocessToTensor();
+      const input = canvasToTensor();
       const feeds = { [session.inputNames[0]]: input };
       const out = await session.run(feeds);
       const probs = Array.from(out[session.outputNames[0]].data);
@@ -241,8 +304,6 @@
       if (confidence < MIN_PET_CONFIDENCE) {
         renderScores(cat, dog, 1 - confidence, null);
       } else {
-        // Confident pet: show Cat/Dog model probs directly; Neither = 0
-        // so title % matches the Dog/Cat bar exactly
         renderScores(cat, dog, 0, null);
       }
       setStatus("Done — image cleared from this device.");
