@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <title>Cat or Dog?</title>
-  <meta name="description" content="Upload a photo. Predicts Cat, Dog, or Neither. Runs privately in your browser." />
+  <meta name="description" content="Cat, Dog, or Neither — prediction runs on your device. Your photo never leaves your system." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -26,7 +26,7 @@
       color: #1a0f08 !important;
     }
   </style>
-  <link rel="stylesheet" href="styles.css?v=solid-7" />
+  <link rel="stylesheet" href="styles.css?v=privacy-8" />
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
@@ -42,8 +42,15 @@
       <h1>Cat · Dog · or Neither.</h1>
       <p class="lede">
         Photos that aren’t clearly a cat or dog (people, objects, etc.) return
-        <strong>Neither</strong>. Everything runs in your browser and is wiped after prediction.
+        <strong>Neither</strong>.
       </p>
+      <aside class="privacy-banner" role="note">
+        <p class="privacy-title">Your photo never leaves your device</p>
+        <p class="privacy-body">
+          Prediction runs entirely in your browser. The image is not uploaded to any server,
+          not stored in the cloud, and is cleared from memory right after you see the result.
+        </p>
+      </aside>
     </header>
 
     <section class="stage" aria-labelledby="upload-label">
@@ -98,7 +105,7 @@
             <span id="nonePct" class="pct">0%</span>
           </div>
         </div>
-        <p class="privacy">Image removed from memory after this result.</p>
+        <p class="privacy">Your photo stayed on this device and has now been cleared from memory.</p>
       </div>
     </section>
 
@@ -108,6 +115,6 @@
   </main>
 
   <canvas id="workCanvas" width="224" height="224" hidden></canvas>
-  <script src="app.js?v=solid-7"></script>
+  <script src="app.js?v=privacy-8"></script>
 </body>
 </html>

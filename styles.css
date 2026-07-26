@@ -90,6 +90,32 @@ html, body {
 
 .lede strong { color: var(--orange-soft); font-weight: 700; }
 
+.privacy-banner {
+  margin-top: 1.15rem;
+  padding: 0.95rem 1.05rem;
+  border-radius: 14px;
+  background: #1e1611;
+  border: 1px solid #4a3224;
+  border-left: 3px solid var(--orange);
+  max-width: 36rem;
+}
+
+.privacy-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.98rem;
+  color: var(--orange-soft);
+  letter-spacing: 0.01em;
+}
+
+.privacy-body {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  font-weight: 500;
+}
+
 .stage {
   margin-top: 1.75rem;
   padding: 1.15rem;
