@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cat or Dog? — MiniResNet Predictor</title>
+  <meta name="description" content="Upload a cat or dog photo. Runs locally in your browser with a MiniResNet model. Images are cleared after prediction." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
+</head>
+<body>
+  <div class="bg" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="hero">
+      <p class="brand">Cat or Dog?</p>
+      <h1>Drop a photo. Get a prediction.</h1>
+      <p class="lede">
+        Runs entirely in your browser with the trained MiniResNet CNN.
+        Your image never leaves this device and is cleared right after the result.
+      </p>
+    </header>
+
+    <section class="panel" aria-labelledby="upload-label">
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-describedby="upload-hint">
+        <input id="fileInput" type="file" accept="image/*" hidden />
+        <div id="previewWrap" class="preview-wrap hidden">
+          <img id="preview" alt="Selected pet photo preview" />
+        </div>
+        <div id="placeholder" class="placeholder">
+          <p id="upload-label">Upload a cat or dog image</p>
+          <p id="upload-hint" class="hint">Click or drag &amp; drop · JPG, PNG, WEBP</p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="predictBtn" type="button" disabled>Predict</button>
+        <button id="clearBtn" type="button" class="ghost" disabled>Clear</button>
+      </div>
+
+      <p id="status" class="status" role="status" aria-live="polite">Loading model…</p>
+
+      <div id="result" class="result hidden" aria-live="polite">
+        <p class="label-out" id="labelOut"></p>
+        <div class="bars">
+          <div class="bar-row">
+            <span>Cat</span>
+            <div class="track"><div id="catBar" class="fill cat"></div></div>
+            <span id="catPct" class="pct">0%</span>
+          </div>
+          <div class="bar-row">
+            <span>Dog</span>
+            <div class="track"><div id="dogBar" class="fill dog"></div></div>
+            <span id="dogPct" class="pct">0%</span>
+          </div>
+        </div>
+        <p class="privacy">Image buffer cleared from memory after this prediction.</p>
+      </div>
+    </section>
+
+    <footer>
+      <p>Custom MiniResNet · ImageNet-normalized 224×224 · ONNX Runtime Web · GitHub Pages</p>
+    </footer>
+  </main>
+
+  <canvas id="workCanvas" width="224" height="224" hidden></canvas>
+  <script src="app.js"></script>
+</body>
+</html>
