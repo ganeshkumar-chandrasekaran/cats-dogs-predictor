@@ -3,7 +3,7 @@
   const IMG_SIZE = 224;
   const IMAGENET_MEAN = [0.485, 0.456, 0.406];
   const IMAGENET_STD = [0.229, 0.224, 0.225];
-  const MIN_PET_CONFIDENCE = 0.55; // kept for reference; pet override uses 0.58 below
+  const MIN_PET_CONFIDENCE = 0.55;
   const MODEL_URL = new URL("./model/miniresnet_cats_dogs.onnx", window.location.href).href;
 
   const CAT_HINTS = [
@@ -207,30 +207,26 @@
     const preds = await gateModel.classify(canvasEl, 10);
     let catScore = 0;
     let dogScore = 0;
-    let animalHint = 0;
-    for (const p of preds) {
-      const name = p.className.toLowerCase();
-      if (labelLooksLikeCat(p.className)) catScore = Math.max(catScore, p.probability);
-      if (labelLooksLikeDog(p.className)) dogScore = Math.max(dogScore, p.probability);
-      // Broad animal fallback (fox, wolf already in dog hints; add generic)
-      if (
-        /(animal|pet|kitten|puppy|feline|canine|mammal)/.test(name) ||
-        labelLooksLikeCat(p.className) ||
-        labelLooksLikeDog(p.className)
-      ) {
-        animalHint = Math.max(animalHint, p.probability);
-      }
-    }
-    // Sum cat+dog mass across top preds — better for cat+dog photos
     let catMass = 0;
     let dogMass = 0;
     for (const p of preds) {
-      if (labelLooksLikeCat(p.className)) catMass += p.probability;
-      if (labelLooksLikeDog(p.className)) dogMass += p.probability;
+      if (labelLooksLikeCat(p.className)) {
+        catScore = Math.max(catScore, p.probability);
+        catMass += p.probability;
+      }
+      if (labelLooksLikeDog(p.className)) {
+        dogScore = Math.max(dogScore, p.probability);
+        dogMass += p.probability;
+      }
     }
-    const petScore = Math.max(catScore, dogScore, catMass + dogMass, animalHint);
-    const isPet = petScore >= 0.06 || catMass + dogMass >= 0.08;
-    return { isPet, petScore, catScore, dogScore, catMass, dogMass, preds };
+    const petScore = Math.max(catScore, dogScore);
+    const petMass = catMass + dogMass;
+    // Require a real cat/dog ImageNet signal — not MiniResNet alone
+    const isPet =
+      petScore >= 0.12 ||
+      petMass >= 0.15 ||
+      (catScore >= 0.05 && dogScore >= 0.05); // cat+dog in one photo
+    return { isPet, petScore, petMass, catScore, dogScore, catMass, dogMass, preds };
   }
 
   function canvasToTensor() {
@@ -331,25 +327,10 @@
       setStatus("Checking if this looks like a cat or dog…");
       const gate = await detectPetSignal(square);
 
-      // Always run Cat/Dog model — needed for cat+dog photos and gate misses
-      setStatus("Classifying…");
-      const input = canvasToTensor();
-      const out = await session.run({ [session.inputNames[0]]: input });
-      const probs = Array.from(out[session.outputNames[0]].data);
-      const cat = probs[0];
-      const dog = probs[1];
-      const confidence = Math.max(cat, dog);
-
-      // Neither only for non-pets. If MiniResNet is fairly sure, trust it even
-      // when MobileNet gate is weak (common with cat+dog in one frame).
-      const treatAsPet =
-        gate.isPet ||
-        confidence >= 0.58 ||
-        gate.petScore >= 0.04 ||
-        (gate.catMass || 0) + (gate.dogMass || 0) >= 0.05;
-
-      if (!treatAsPet) {
-        const neither = Math.min(0.96, Math.max(0.80, 1 - Math.max(gate.petScore, confidence * 0.5)));
+      // MobileNet gate decides pet vs Neither (humans/objects → Neither).
+      // Do NOT use MiniResNet confidence alone — it always picks Cat or Dog.
+      if (!gate.isPet) {
+        const neither = Math.min(0.96, Math.max(0.82, 1 - gate.petScore));
         const residual = 1 - neither;
         renderScores(
           residual / 2,
@@ -357,10 +338,18 @@
           neither,
           `Neither — not a cat or dog  ·  ${(neither * 100).toFixed(1)}%`
         );
-      } else {
-        // Always pick Cat or Dog for pet-like images (no Neither takeover)
-        renderScores(cat, dog, 0, null);
+        setStatus("Done — image cleared from this device.");
+        return;
       }
+
+      setStatus("Pet detected — classifying Cat vs Dog…");
+      const input = canvasToTensor();
+      const out = await session.run({ [session.inputNames[0]]: input });
+      const probs = Array.from(out[session.outputNames[0]].data);
+      const cat = probs[0];
+      const dog = probs[1];
+      // Pet confirmed by MobileNet → always Cat or Dog (handles cat+dog photos)
+      renderScores(cat, dog, 0, null);
       setStatus("Done — image cleared from this device.");
     } catch (err) {
       console.error(err);
