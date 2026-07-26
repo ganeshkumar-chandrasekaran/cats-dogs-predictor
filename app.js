@@ -163,20 +163,27 @@
     return new ort.Tensor("float32", float32, [1, 3, IMG_SIZE, IMG_SIZE]);
   }
 
+  function normalizeScores(cat, dog, neither) {
+    const sum = cat + dog + neither;
+    if (sum <= 0) return { cat: 0, dog: 0, neither: 1 };
+    return { cat: cat / sum, dog: dog / sum, neither: neither / sum };
+  }
+
   function renderScores(cat, dog, neither, label) {
+    const s = normalizeScores(cat, dog, neither);
     labelOut.textContent = label;
-    labelOut.classList.toggle("is-neither", neither >= Math.max(cat, dog));
+    labelOut.classList.toggle("is-neither", s.neither >= Math.max(s.cat, s.dog));
     catBar.style.width = "0%";
     dogBar.style.width = "0%";
     noneBar.style.width = "0%";
     requestAnimationFrame(() => {
-      catBar.style.width = `${(cat * 100).toFixed(1)}%`;
-      dogBar.style.width = `${(dog * 100).toFixed(1)}%`;
-      noneBar.style.width = `${(neither * 100).toFixed(1)}%`;
+      catBar.style.width = `${(s.cat * 100).toFixed(1)}%`;
+      dogBar.style.width = `${(s.dog * 100).toFixed(1)}%`;
+      noneBar.style.width = `${(s.neither * 100).toFixed(1)}%`;
     });
-    catPct.textContent = `${(cat * 100).toFixed(1)}%`;
-    dogPct.textContent = `${(dog * 100).toFixed(1)}%`;
-    nonePct.textContent = `${(neither * 100).toFixed(1)}%`;
+    catPct.textContent = `${(s.cat * 100).toFixed(1)}%`;
+    dogPct.textContent = `${(s.dog * 100).toFixed(1)}%`;
+    nonePct.textContent = `${(s.neither * 100).toFixed(1)}%`;
     resultEl.classList.remove("hidden");
   }
 
@@ -196,9 +203,15 @@
       const gate = await detectPetSignal(preview);
 
       if (!gate.isPet) {
-        // Not a pet → Neither
-        const neither = Math.max(0.75, 1 - gate.petScore);
-        renderScores(0.05, 0.05, neither, "Neither — not a cat or dog");
+        // Not a pet → Neither dominates; Cat/Dog share tiny residual (sums to 100%)
+        const neither = Math.min(0.96, Math.max(0.80, 1 - gate.petScore));
+        const residual = 1 - neither;
+        renderScores(
+          residual / 2,
+          residual / 2,
+          neither,
+          "Neither — not a cat or dog"
+        );
         setStatus("Done — image cleared from this device.");
         return;
       }
@@ -214,14 +227,15 @@
 
       if (confidence < MIN_PET_CONFIDENCE) {
         const neither = 1 - confidence;
-        renderScores(cat * 0.5, dog * 0.5, neither, "Neither — unsure if cat or dog");
+        renderScores(cat, dog, neither, "Neither — unsure if cat or dog");
       } else {
         const predIdx = cat >= dog ? 0 : 1;
-        // Keep a small Neither slice so the third bar is meaningful
-        const neither = Math.max(0.02, 1 - confidence);
-        const scale = (1 - neither) / (cat + dog);
-        cat *= scale;
-        dog *= scale;
+        // Small Neither remainder so bars always sum to 100%
+        const neither = Math.max(0.02, Math.min(0.15, 1 - confidence));
+        const remain = 1 - neither;
+        const petSum = cat + dog;
+        cat = (cat / petSum) * remain;
+        dog = (dog / petSum) * remain;
         renderScores(
           cat,
           dog,
