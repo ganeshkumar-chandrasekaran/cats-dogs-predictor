@@ -3,7 +3,7 @@
   const IMG_SIZE = 224;
   const IMAGENET_MEAN = [0.485, 0.456, 0.406];
   const IMAGENET_STD = [0.229, 0.224, 0.225];
-  const MIN_PET_CONFIDENCE = 0.60;
+  const MIN_PET_CONFIDENCE = 0.55;
   const MODEL_URL = new URL("./model/miniresnet_cats_dogs.onnx", window.location.href).href;
 
   const CAT_HINTS = [
@@ -46,7 +46,10 @@
   const dogPct = document.getElementById("dogPct");
   const nonePct = document.getElementById("nonePct");
   const canvas = document.getElementById("workCanvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: false });
+
+  function getCtx() {
+    return canvas.getContext("2d", { willReadFrequently: true, alpha: false });
+  }
 
   let session = null;
   let gateModel = null;
@@ -68,7 +71,7 @@
   }
 
   function wipeImageData() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    getCtx().clearRect(0, 0, canvas.width || IMG_SIZE, canvas.height || IMG_SIZE);
     selectedFile = null;
     fileInput.value = "";
     revokePreview();
@@ -85,84 +88,117 @@
     return DOG_HINTS.some((h) => n.includes(h));
   }
 
-  /**
-   * Mobile photos often store EXIF orientation. Desktops may auto-correct in <img>,
-   * while canvas drawImage can stay sideways on phones — causing wrong predictions.
-   * createImageBitmap(..., { imageOrientation: 'from-image' }) fixes that.
-   */
-  async function loadOrientedBitmap(source) {
-    if (typeof createImageBitmap === "function") {
-      try {
-        return await createImageBitmap(source, { imageOrientation: "from-image" });
-      } catch (_) {
+  function getExifOrientation(file) {
+    return new Promise((resolve) => {
+      const type = (file && file.type) || "";
+      if (type && !/jpe?g/i.test(type)) {
+        resolve(1);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
         try {
-          return await createImageBitmap(source);
+          const view = new DataView(reader.result);
+          if (view.byteLength < 2 || view.getUint16(0, false) !== 0xffd8) {
+            resolve(1);
+            return;
+          }
+          let offset = 2;
+          while (offset + 4 < view.byteLength) {
+            const marker = view.getUint16(offset, false);
+            offset += 2;
+            if (marker === 0xffe1) {
+              if (
+                view.getUint32(offset + 2, false) !== 0x45786966 ||
+                view.getUint16(offset + 6, false) !== 0x0000
+              ) {
+                offset += view.getUint16(offset, false);
+                continue;
+              }
+              const tiff = offset + 8;
+              const little = view.getUint16(tiff, false) === 0x4949;
+              const ifd0 = tiff + view.getUint32(tiff + 4, little);
+              const entries = view.getUint16(ifd0, little);
+              for (let i = 0; i < entries; i++) {
+                const entry = ifd0 + 2 + i * 12;
+                if (view.getUint16(entry, little) === 0x0112) {
+                  resolve(view.getUint16(entry + 8, little) || 1);
+                  return;
+                }
+              }
+              resolve(1);
+              return;
+            }
+            if ((marker & 0xff00) !== 0xff00 || marker === 0xffda) break;
+            offset += view.getUint16(offset, false);
+          }
+          resolve(1);
         } catch (_) {
-          /* fall through */
+          resolve(1);
         }
-      }
-    }
-
-    // Fallback: decode via Image element
-    const img = await loadHTMLImage(source);
-    const c = document.createElement("canvas");
-    c.width = img.naturalWidth || img.width;
-    c.height = img.naturalHeight || img.height;
-    c.getContext("2d").drawImage(img, 0, 0);
-    if (typeof createImageBitmap === "function") {
-      return createImageBitmap(c);
-    }
-    return c;
-  }
-
-  function loadHTMLImage(source) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      if (typeof source === "string") {
-        img.src = source;
-      } else if (source instanceof Blob) {
-        const url = URL.createObjectURL(source);
-        img.onload = () => {
-          URL.revokeObjectURL(url);
-          resolve(img);
-        };
-        img.src = url;
-      } else {
-        // HTMLImageElement already loaded
-        if (source.complete && source.naturalWidth) resolve(source);
-        else {
-          source.onload = () => resolve(source);
-          source.onerror = reject;
-        }
-      }
+      };
+      reader.onerror = () => resolve(1);
+      reader.readAsArrayBuffer(file.slice(0, 128 * 1024));
     });
   }
 
-  /** Center-crop cover into square canvas (same pixels for gate + classifier). */
-  function drawCoverToCanvas(bitmap, size) {
-    const iw = bitmap.width;
-    const ih = bitmap.height;
-    if (!iw || !ih) throw new Error("Invalid image dimensions");
-
-    canvas.width = size;
-    canvas.height = size;
-    ctx.clearRect(0, 0, size, size);
-
-    const scale = Math.max(size / iw, size / ih);
-    const sw = size / scale;
-    const sh = size / scale;
-    const sx = (iw - sw) / 2;
-    const sy = (ih - sh) / 2;
-    ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, size, size);
-
-    if (typeof bitmap.close === "function") bitmap.close();
+  async function waitForPreview() {
+    if (!preview.src) throw new Error("No preview image");
+    if (preview.decode) {
+      try {
+        await preview.decode();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    if (!preview.complete || !preview.naturalWidth) {
+      await new Promise((resolve, reject) => {
+        preview.onload = resolve;
+        preview.onerror = reject;
+      });
+    }
   }
 
+  /**
+   * Match training: transforms.Resize((224, 224)) stretches to exact size (no center-crop).
+   * Orientation: use preview pixels when EXIF is normal; otherwise decode with from-image.
+   */
   async function prepareSquareCanvasFromFile(file) {
-    const bitmap = await loadOrientedBitmap(file);
-    drawCoverToCanvas(bitmap, IMG_SIZE);
+    await waitForPreview();
+    const orientation = await getExifOrientation(file);
+
+    let source = null;
+    let shouldClose = false;
+
+    if (orientation !== 1 && typeof createImageBitmap === "function") {
+      try {
+        source = await createImageBitmap(file, { imageOrientation: "from-image" });
+        shouldClose = true;
+      } catch (_) {
+        source = null;
+      }
+    }
+
+    if (!source && typeof createImageBitmap === "function") {
+      try {
+        // Displayed <img> is usually already upright on desktop & modern mobile
+        source = await createImageBitmap(preview);
+        shouldClose = true;
+      } catch (_) {
+        source = null;
+      }
+    }
+
+    if (!source) source = preview;
+
+    canvas.width = IMG_SIZE;
+    canvas.height = IMG_SIZE;
+    const ctx = getCtx();
+    ctx.clearRect(0, 0, IMG_SIZE, IMG_SIZE);
+    // Stretch to 224×224 — same as training Resize((224, 224))
+    ctx.drawImage(source, 0, 0, IMG_SIZE, IMG_SIZE);
+
+    if (shouldClose && typeof source.close === "function") source.close();
     return canvas;
   }
 
@@ -175,23 +211,23 @@
       if (labelLooksLikeDog(p.className)) dogScore = Math.max(dogScore, p.probability);
     }
     const petScore = Math.max(catScore, dogScore);
-    const isPet = petScore >= 0.12;
+    const isPet = petScore >= 0.10;
     return { isPet, petScore, catScore, dogScore, preds };
   }
 
   function canvasToTensor() {
+    const ctx = getCtx();
     const { data } = ctx.getImageData(0, 0, IMG_SIZE, IMG_SIZE);
     const float32 = new Float32Array(3 * IMG_SIZE * IMG_SIZE);
     let i = 0;
     for (let y = 0; y < IMG_SIZE; y++) {
       for (let x = 0; x < IMG_SIZE; x++) {
         const p = (y * IMG_SIZE + x) * 4;
-        const r = data[p] / 255;
-        const g = data[p + 1] / 255;
-        const b = data[p + 2] / 255;
-        float32[i] = (r - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
-        float32[IMG_SIZE * IMG_SIZE + i] = (g - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
-        float32[2 * IMG_SIZE * IMG_SIZE + i] = (b - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
+        float32[i] = (data[p] / 255 - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
+        float32[IMG_SIZE * IMG_SIZE + i] =
+          (data[p + 1] / 255 - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
+        float32[2 * IMG_SIZE * IMG_SIZE + i] =
+          (data[p + 2] / 255 - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
         i++;
       }
     }
@@ -245,7 +281,6 @@
     ].sort((a, b) => b.v - a.v);
     const top = ranked[0];
     const pct = (top.v * 100).toFixed(1);
-
     const label =
       labelOverride ||
       (top.name === "Neither"
@@ -273,7 +308,6 @@
     predictBtn.disabled = true;
     setStatus("Preparing image…");
     try {
-      // One oriented square for BOTH MobileNet gate and MiniResNet
       const square = await prepareSquareCanvasFromFile(selectedFile);
 
       setStatus("Checking if this looks like a cat or dog…");
@@ -294,8 +328,7 @@
 
       setStatus("Pet detected — classifying Cat vs Dog…");
       const input = canvasToTensor();
-      const feeds = { [session.inputNames[0]]: input };
-      const out = await session.run(feeds);
+      const out = await session.run({ [session.inputNames[0]]: input });
       const probs = Array.from(out[session.outputNames[0]].data);
       const cat = probs[0];
       const dog = probs[1];
