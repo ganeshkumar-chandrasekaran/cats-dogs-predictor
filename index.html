@@ -26,7 +26,7 @@
       color: #1a0f08 !important;
     }
   </style>
-  <link rel="stylesheet" href="styles.css?v=neither-balance-15" />
+  <link rel="stylesheet" href="styles.css?v=keep-preview-16" />
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
@@ -48,9 +48,10 @@
         <p class="privacy-title">Your photo never leaves your device</p>
         <p class="privacy-body">
           Prediction runs entirely in your browser. The image is not uploaded to any server
-          and not stored in the cloud. It is only held briefly in temporary browser memory
-          (RAM — short-term working space while this page is open), then cleared after you
-          see the result. Your original file in Photos or Downloads is not deleted or changed.
+          and not stored in the cloud — it stays only in temporary browser memory
+          (RAM — short-term working space while this page is open).
+          The preview is cleared when you upload another photo or press Clear
+          (not when you press Predict). Your original file in Photos or Downloads is never deleted or changed.
         </p>
       </aside>
     </header>
@@ -107,7 +108,7 @@
             <span id="nonePct" class="pct">0%</span>
           </div>
         </div>
-        <p class="privacy">Cleared from temporary browser memory (RAM). Your original photo file is untouched.</p>
+        <p class="privacy">Stays on this device only. Cleared when you upload again or press Clear — not when you Predict.</p>
       </div>
     </section>
 
@@ -117,6 +118,6 @@
   </main>
 
   <canvas id="workCanvas" width="224" height="224" hidden></canvas>
-  <script src="app.js?v=neither-balance-15"></script>
+  <script src="app.js?v=keep-preview-16"></script>
 </body>
 </html>

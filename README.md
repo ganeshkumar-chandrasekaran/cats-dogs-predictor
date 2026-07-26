@@ -7,7 +7,7 @@
 Browser-based Cats vs Dogs classifier using a custom MiniResNet (ONNX Runtime Web).
 
 - Images are processed **locally in your browser**
-- Uploaded images are **cleared from memory after prediction**
+- Preview is cleared when you upload again or press Clear (not on Predict)
 - Hosted on **GitHub Pages**
 
 ## Find this URL on GitHub

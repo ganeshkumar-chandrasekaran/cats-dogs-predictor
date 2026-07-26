@@ -338,7 +338,7 @@
           neither,
           `Neither — not a cat or dog  ·  ${(neither * 100).toFixed(1)}%`
         );
-        setStatus("Done — image cleared from this device.");
+        setStatus("Done. Upload another photo or press Clear to remove this image.");
         return;
       }
 
@@ -350,14 +350,14 @@
       const dog = probs[1];
       // Pet confirmed by MobileNet → always Cat or Dog (handles cat+dog photos)
       renderScores(cat, dog, 0, null);
-      setStatus("Done — image cleared from this device.");
+      setStatus("Done. Upload another photo or press Clear to remove this image.");
     } catch (err) {
       console.error(err);
       setStatus("Prediction failed. Try another image.");
     } finally {
-      wipeImageData();
-      predictBtn.disabled = true;
-      clearBtn.disabled = true;
+      // Keep preview after Predict — clear only on new upload or Clear button
+      predictBtn.disabled = !selectedFile;
+      clearBtn.disabled = !selectedFile;
     }
   }
 
