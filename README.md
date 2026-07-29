@@ -1,28 +1,10 @@
-# Cat or Dog Predictor
+# Cat or Dog? — Dual Model Predictor
 
-## Live website (click this)
+Live site: https://ganeshkumar-chandrasekaran.github.io/cats-dogs-predictor/
 
-### https://ganeshkumar-chandrasekaran.github.io/cats-dogs-predictor/
+On-device browser inference comparing:
 
-Browser-based Cats vs Dogs classifier using a custom MiniResNet (ONNX Runtime Web).
+- **Custom CNN** (`model/custom_cnn.onnx`) — MiniResNet trained from scratch
+- **Transfer Learning** (`model/transfer_resnet18.onnx`) — ResNet18 + GAP head
 
-- Images are processed **locally in your browser**
-- Preview is cleared when you upload again or press Clear (not on Predict)
-- Hosted on **GitHub Pages**
-
-## Find this URL on GitHub
-
-1. Open the repo: https://github.com/ganeshkumar-chandrasekaran/cats-dogs-predictor
-2. On the right side, click the **gear icon** next to **About**
-3. Tick **Use your GitHub Pages website** (or paste the URL into Website)
-4. Save — the link appears under About
-5. Or open **Settings → Pages** — it shows “Your site is live at …”
-
-## Local preview
-
-```bash
-cd cats-dogs-predictor
-python3 -m http.server 8080
-```
-
-Open http://localhost:8080
+A MobileNet gate marks non-pet images as **Neither**. Photos never leave the device.

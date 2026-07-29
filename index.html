@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <title>Cat or Dog?</title>
-  <meta name="description" content="Cat, Dog, or Neither — prediction runs on your device. Your photo never leaves your system." />
+  <meta name="description" content="Compare Custom CNN vs Transfer Learning (ResNet18). Prediction runs on your device." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -26,7 +26,7 @@
       color: #1a0f08 !important;
     }
   </style>
-  <link rel="stylesheet" href="styles.css?v=keep-preview-16" />
+  <link rel="stylesheet" href="styles.css?v=dual-models-1" />
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
@@ -39,10 +39,10 @@
   <main class="frame">
     <header class="hero">
       <p class="brand">Cat or Dog?</p>
-      <h1>Cat · Dog · or Neither.</h1>
+      <h1>Custom CNN · Transfer Learning.</h1>
       <p class="lede">
-        Photos that aren’t clearly a cat or dog (people, objects, etc.) return
-        <strong>Neither</strong>.
+        Compare both assignment models side by side. Photos that aren’t clearly a cat or dog
+        return <strong>Neither</strong> via an on-device MobileNet gate.
       </p>
       <aside class="privacy-banner" role="note">
         <p class="privacy-title">Your photo never leaves your device</p>
@@ -87,37 +87,63 @@
       <p id="status" class="status" role="status" aria-live="polite">Warming up models…</p>
 
       <div id="result" class="result hidden" aria-live="polite">
-        <div class="result-top">
-          <p class="eyebrow">Prediction</p>
-          <p class="label-out" id="labelOut"></p>
-        </div>
-        <div class="bars">
-          <div class="bar-row">
-            <span class="cls">Cat</span>
-            <div class="track"><div id="catBar" class="fill cat"></div></div>
-            <span id="catPct" class="pct">0%</span>
-          </div>
-          <div class="bar-row">
-            <span class="cls">Dog</span>
-            <div class="track"><div id="dogBar" class="fill dog"></div></div>
-            <span id="dogPct" class="pct">0%</span>
-          </div>
-          <div class="bar-row">
-            <span class="cls">Neither</span>
-            <div class="track"><div id="noneBar" class="fill none"></div></div>
-            <span id="nonePct" class="pct">0%</span>
-          </div>
+        <div class="model-grid">
+          <article class="model-card" id="customCard">
+            <p class="eyebrow">Custom CNN</p>
+            <p class="model-sub">MiniResNet (trained from scratch)</p>
+            <p class="label-out" id="customLabelOut"></p>
+            <div class="bars">
+              <div class="bar-row">
+                <span class="cls">Cat</span>
+                <div class="track"><div id="customCatBar" class="fill cat"></div></div>
+                <span id="customCatPct" class="pct">0%</span>
+              </div>
+              <div class="bar-row">
+                <span class="cls">Dog</span>
+                <div class="track"><div id="customDogBar" class="fill dog"></div></div>
+                <span id="customDogPct" class="pct">0%</span>
+              </div>
+              <div class="bar-row">
+                <span class="cls">Neither</span>
+                <div class="track"><div id="customNoneBar" class="fill none"></div></div>
+                <span id="customNonePct" class="pct">0%</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="model-card" id="transferCard">
+            <p class="eyebrow">Transfer Learning</p>
+            <p class="model-sub">ResNet18 (ImageNet backbone)</p>
+            <p class="label-out" id="transferLabelOut"></p>
+            <div class="bars">
+              <div class="bar-row">
+                <span class="cls">Cat</span>
+                <div class="track"><div id="transferCatBar" class="fill cat"></div></div>
+                <span id="transferCatPct" class="pct">0%</span>
+              </div>
+              <div class="bar-row">
+                <span class="cls">Dog</span>
+                <div class="track"><div id="transferDogBar" class="fill dog"></div></div>
+                <span id="transferDogPct" class="pct">0%</span>
+              </div>
+              <div class="bar-row">
+                <span class="cls">Neither</span>
+                <div class="track"><div id="transferNoneBar" class="fill none"></div></div>
+                <span id="transferNonePct" class="pct">0%</span>
+              </div>
+            </div>
+          </article>
         </div>
         <p class="privacy">Stays on this device only. Cleared when you upload again or press Clear — not when you Predict.</p>
       </div>
     </section>
 
     <footer class="foot">
-      <span>MiniResNet + MobileNet gate · ONNX / TF.js · GitHub Pages</span>
+      <span>Custom MiniResNet + ResNet18 TL · MobileNet gate · ONNX / TF.js · GitHub Pages</span>
     </footer>
   </main>
 
   <canvas id="workCanvas" width="224" height="224" hidden></canvas>
-  <script src="app.js?v=keep-preview-16"></script>
+  <script src="app.js?v=dual-models-1"></script>
 </body>
 </html>

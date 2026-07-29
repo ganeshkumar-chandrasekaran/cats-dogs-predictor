@@ -1,10 +1,10 @@
 (() => {
-  const CLASS_NAMES = ["Cat", "Dog", "Neither"];
   const IMG_SIZE = 224;
+  const RESIZE_SIDE = 256;
   const IMAGENET_MEAN = [0.485, 0.456, 0.406];
   const IMAGENET_STD = [0.229, 0.224, 0.225];
-  const MIN_PET_CONFIDENCE = 0.55;
-  const MODEL_URL = new URL("./model/miniresnet_cats_dogs.onnx", window.location.href).href;
+  const CUSTOM_URL = new URL("./model/custom_cnn.onnx", window.location.href).href;
+  const TRANSFER_URL = new URL("./model/transfer_resnet18.onnx", window.location.href).href;
 
   const CAT_HINTS = [
     "cat", "kitten", "tabby", "tiger cat", "persian cat", "siamese cat",
@@ -38,26 +38,45 @@
   const clearBtn = document.getElementById("clearBtn");
   const statusEl = document.getElementById("status");
   const resultEl = document.getElementById("result");
-  const labelOut = document.getElementById("labelOut");
-  const catBar = document.getElementById("catBar");
-  const dogBar = document.getElementById("dogBar");
-  const noneBar = document.getElementById("noneBar");
-  const catPct = document.getElementById("catPct");
-  const dogPct = document.getElementById("dogPct");
-  const nonePct = document.getElementById("nonePct");
   const canvas = document.getElementById("workCanvas");
+
+  const panels = {
+    custom: {
+      labelOut: document.getElementById("customLabelOut"),
+      catBar: document.getElementById("customCatBar"),
+      dogBar: document.getElementById("customDogBar"),
+      noneBar: document.getElementById("customNoneBar"),
+      catPct: document.getElementById("customCatPct"),
+      dogPct: document.getElementById("customDogPct"),
+      nonePct: document.getElementById("customNonePct"),
+    },
+    transfer: {
+      labelOut: document.getElementById("transferLabelOut"),
+      catBar: document.getElementById("transferCatBar"),
+      dogBar: document.getElementById("transferDogBar"),
+      noneBar: document.getElementById("transferNoneBar"),
+      catPct: document.getElementById("transferCatPct"),
+      dogPct: document.getElementById("transferDogPct"),
+      nonePct: document.getElementById("transferNonePct"),
+    },
+  };
 
   function getCtx() {
     return canvas.getContext("2d", { willReadFrequently: true, alpha: false });
   }
 
-  let session = null;
+  let customSession = null;
+  let transferSession = null;
   let gateModel = null;
   let objectUrl = null;
   let selectedFile = null;
 
   function setStatus(msg) {
     statusEl.textContent = msg;
+  }
+
+  function modelsReady() {
+    return !!(customSession && transferSession && gateModel);
   }
 
   function revokePreview() {
@@ -160,8 +179,7 @@
   }
 
   /**
-   * Match training: transforms.Resize((224, 224)) stretches to exact size (no center-crop).
-   * Orientation: use preview pixels when EXIF is normal; otherwise decode with from-image.
+   * Match notebook test pipeline: Resize(256) -> CenterCrop(224) -> Normalize
    */
   async function prepareSquareCanvasFromFile(file) {
     await waitForPreview();
@@ -181,7 +199,6 @@
 
     if (!source && typeof createImageBitmap === "function") {
       try {
-        // Displayed <img> is usually already upright on desktop & modern mobile
         source = await createImageBitmap(preview);
         shouldClose = true;
       } catch (_) {
@@ -191,19 +208,31 @@
 
     if (!source) source = preview;
 
+    const sw = source.width || source.naturalWidth || source.videoWidth;
+    const sh = source.height || source.naturalHeight || source.videoHeight;
+    const scale = RESIZE_SIDE / Math.min(sw, sh);
+    const rw = Math.round(sw * scale);
+    const rh = Math.round(sh * scale);
+    const sx = Math.max(0, Math.floor((rw - IMG_SIZE) / 2));
+    const sy = Math.max(0, Math.floor((rh - IMG_SIZE) / 2));
+
+    const tmp = document.createElement("canvas");
+    tmp.width = rw;
+    tmp.height = rh;
+    const tctx = tmp.getContext("2d", { alpha: false });
+    tctx.drawImage(source, 0, 0, rw, rh);
+
     canvas.width = IMG_SIZE;
     canvas.height = IMG_SIZE;
     const ctx = getCtx();
     ctx.clearRect(0, 0, IMG_SIZE, IMG_SIZE);
-    // Stretch to 224×224 — same as training Resize((224, 224))
-    ctx.drawImage(source, 0, 0, IMG_SIZE, IMG_SIZE);
+    ctx.drawImage(tmp, sx, sy, IMG_SIZE, IMG_SIZE, 0, 0, IMG_SIZE, IMG_SIZE);
 
     if (shouldClose && typeof source.close === "function") source.close();
     return canvas;
   }
 
   async function detectPetSignal(canvasEl) {
-    // top-10 helps when both cat and dog appear (labels can be split)
     const preds = await gateModel.classify(canvasEl, 10);
     let catScore = 0;
     let dogScore = 0;
@@ -221,11 +250,10 @@
     }
     const petScore = Math.max(catScore, dogScore);
     const petMass = catMass + dogMass;
-    // Require a real cat/dog ImageNet signal — not MiniResNet alone
     const isPet =
       petScore >= 0.12 ||
       petMass >= 0.15 ||
-      (catScore >= 0.05 && dogScore >= 0.05); // cat+dog in one photo
+      (catScore >= 0.05 && dogScore >= 0.05);
     return { isPet, petScore, petMass, catScore, dogScore, catMass, dogMass, preds };
   }
 
@@ -248,16 +276,23 @@
     return new ort.Tensor("float32", float32, [1, 3, IMG_SIZE, IMG_SIZE]);
   }
 
+  async function runOnnx(session, input) {
+    const out = await session.run({ [session.inputNames[0]]: input });
+    return Array.from(out[session.outputNames[0]].data);
+  }
+
   async function loadModels() {
     try {
-      setStatus("Loading models…");
+      setStatus("Loading Custom CNN + Transfer Learning models…");
       ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/";
       if (window.tf) await tf.ready();
-      const [sess, gate] = await Promise.all([
-        ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] }),
+      const [custom, transfer, gate] = await Promise.all([
+        ort.InferenceSession.create(CUSTOM_URL, { executionProviders: ["wasm"] }),
+        ort.InferenceSession.create(TRANSFER_URL, { executionProviders: ["wasm"] }),
         mobilenet.load({ version: 2, alpha: 1.0 }),
       ]);
-      session = sess;
+      customSession = custom;
+      transferSession = transfer;
       gateModel = gate;
       setStatus("Ready — drop a photo (cat, dog, or anything else).");
       if (selectedFile) predictBtn.disabled = false;
@@ -274,7 +309,7 @@
     preview.src = objectUrl;
     previewWrap.classList.remove("hidden");
     placeholder.classList.add("hidden");
-    predictBtn.disabled = !(session && gateModel);
+    predictBtn.disabled = !modelsReady();
     clearBtn.disabled = false;
     resultEl.classList.add("hidden");
     setStatus("Image selected. Click Predict.");
@@ -286,7 +321,7 @@
     return { cat: cat / sum, dog: dog / sum, neither: neither / sum };
   }
 
-  function renderScores(cat, dog, neither, labelOverride) {
+  function renderPanel(panel, cat, dog, neither, labelOverride) {
     const s = normalizeScores(cat, dog, neither);
     const ranked = [
       { name: "Cat", v: s.cat },
@@ -301,24 +336,23 @@
         ? `Neither  ·  ${pct}%`
         : `It’s a ${top.name}  ·  ${pct}%`);
 
-    labelOut.textContent = label;
-    labelOut.classList.toggle("is-neither", top.name === "Neither");
-    catBar.style.width = "0%";
-    dogBar.style.width = "0%";
-    noneBar.style.width = "0%";
+    panel.labelOut.textContent = label;
+    panel.labelOut.classList.toggle("is-neither", top.name === "Neither");
+    panel.catBar.style.width = "0%";
+    panel.dogBar.style.width = "0%";
+    panel.noneBar.style.width = "0%";
     requestAnimationFrame(() => {
-      catBar.style.width = `${(s.cat * 100).toFixed(1)}%`;
-      dogBar.style.width = `${(s.dog * 100).toFixed(1)}%`;
-      noneBar.style.width = `${(s.neither * 100).toFixed(1)}%`;
+      panel.catBar.style.width = `${(s.cat * 100).toFixed(1)}%`;
+      panel.dogBar.style.width = `${(s.dog * 100).toFixed(1)}%`;
+      panel.noneBar.style.width = `${(s.neither * 100).toFixed(1)}%`;
     });
-    catPct.textContent = `${(s.cat * 100).toFixed(1)}%`;
-    dogPct.textContent = `${(s.dog * 100).toFixed(1)}%`;
-    nonePct.textContent = `${(s.neither * 100).toFixed(1)}%`;
-    resultEl.classList.remove("hidden");
+    panel.catPct.textContent = `${(s.cat * 100).toFixed(1)}%`;
+    panel.dogPct.textContent = `${(s.dog * 100).toFixed(1)}%`;
+    panel.nonePct.textContent = `${(s.neither * 100).toFixed(1)}%`;
   }
 
   async function predict() {
-    if (!session || !gateModel || !selectedFile) return;
+    if (!modelsReady() || !selectedFile) return;
     predictBtn.disabled = true;
     setStatus("Preparing image…");
     try {
@@ -327,35 +361,32 @@
       setStatus("Checking if this looks like a cat or dog…");
       const gate = await detectPetSignal(square);
 
-      // MobileNet gate decides pet vs Neither (humans/objects → Neither).
-      // Do NOT use MiniResNet confidence alone — it always picks Cat or Dog.
       if (!gate.isPet) {
         const neither = Math.min(0.96, Math.max(0.82, 1 - gate.petScore));
         const residual = 1 - neither;
-        renderScores(
-          residual / 2,
-          residual / 2,
-          neither,
-          `Neither — not a cat or dog  ·  ${(neither * 100).toFixed(1)}%`
-        );
+        const neitherLabel = `Neither — not a cat or dog  ·  ${(neither * 100).toFixed(1)}%`;
+        renderPanel(panels.custom, residual / 2, residual / 2, neither, neitherLabel);
+        renderPanel(panels.transfer, residual / 2, residual / 2, neither, neitherLabel);
+        resultEl.classList.remove("hidden");
         setStatus("Done. Upload another photo or press Clear to remove this image.");
         return;
       }
 
-      setStatus("Pet detected — classifying Cat vs Dog…");
+      setStatus("Pet detected — running Custom CNN + Transfer Learning…");
       const input = canvasToTensor();
-      const out = await session.run({ [session.inputNames[0]]: input });
-      const probs = Array.from(out[session.outputNames[0]].data);
-      const cat = probs[0];
-      const dog = probs[1];
-      // Pet confirmed by MobileNet → always Cat or Dog (handles cat+dog photos)
-      renderScores(cat, dog, 0, null);
+      const [customProbs, transferProbs] = await Promise.all([
+        runOnnx(customSession, input),
+        runOnnx(transferSession, input),
+      ]);
+
+      renderPanel(panels.custom, customProbs[0], customProbs[1], 0, null);
+      renderPanel(panels.transfer, transferProbs[0], transferProbs[1], 0, null);
+      resultEl.classList.remove("hidden");
       setStatus("Done. Upload another photo or press Clear to remove this image.");
     } catch (err) {
       console.error(err);
       setStatus("Prediction failed. Try another image.");
     } finally {
-      // Keep preview after Predict — clear only on new upload or Clear button
       predictBtn.disabled = !selectedFile;
       clearBtn.disabled = !selectedFile;
     }
